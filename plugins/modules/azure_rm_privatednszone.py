@@ -46,6 +46,16 @@ options:
         choices:
             - absent
             - present
+    registration_virtual_networks:
+        description:
+            - A list of references to virtual networks that register hostnames in this DNS zone.
+            - Each element can be the name or resource id, or a dict contains C(name), C(resource_group) information of the virtual network.
+        type: list
+    resolution_virtual_networks:
+        description:
+            - A list of references to virtual networks that resolve records in this DNS zone.
+            - Each element can be the name or resource id, or a dict contains C(name), C(resource_group) information of the virtual network.
+        type: list
 
 extends_documentation_fragment:
     - azure.azcollection.azure
@@ -102,12 +112,13 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
     def __init__(self):
 
         # define user inputs from playbook
-        self.module_arg_spec = dict(resource_group=dict(type='str',
-                                                        required=True),
-                                    name=dict(type='str', required=True),
-                                    state=dict(choices=['present', 'absent'],
-                                               default='present',
-                                               type='str'))
+        self.module_arg_spec = dict(
+            resource_group=dict(type='str', required=True),
+            name=dict(type='str', required=True),
+            state=dict(choices=['present', 'absent'], default='present', type='str'),
+            registration_virtual_networks=dict(type='list', elements='raw'),
+            resolution_virtual_networks=dict(type='list', elements='raw')
+        )
 
         # store the results of the module operation
         self.results = dict(changed=False, state=dict())
@@ -116,6 +127,8 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
         self.name = None
         self.state = None
         self.tags = None
+        self.registration_virtual_networks = None
+        self.resolution_virtual_networks = None
 
         super(AzureRMPrivateDNSZone, self).__init__(self.module_arg_spec,
                                                     supports_check_mode=True,
@@ -127,6 +140,9 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
         zone = None
         for key in list(self.module_arg_spec.keys()) + ['tags']:
             setattr(self, key, kwargs[key])
+
+        self.registration_virtual_networks = self.preprocess_vn_list(self.registration_virtual_networks)
+        self.resolution_virtual_networks = self.preprocess_vn_list(self.resolution_virtual_networks)
 
         self.results['check_mode'] = self.check_mode
 
@@ -152,6 +168,19 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
                     results['tags'])
                 if update_tags:
                     changed = True
+                if self.resolution_virtual_networks:
+                    if set(self.resolution_virtual_networks) != set(results['resolution_virtual_networks'] or []):
+                        changed = True
+                        results['resolution_virtual_networks'] = self.resolution_virtual_networks
+                else:
+                    # this property should not be changed
+                    self.resolution_virtual_networks = results['resolution_virtual_networks']
+                if self.registration_virtual_networks:
+                    if set(self.registration_virtual_networks) != set(results['registration_virtual_networks'] or []):
+                        changed = True
+                        results['registration_virtual_networks'] = self.registration_virtual_networks
+                else:
+                    self.registration_virtual_networks = results['registration_virtual_networks']
             elif self.state == 'absent':
                 changed = True
 
@@ -174,6 +203,10 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
             if self.state == 'present':
                 zone = self.private_dns_models.PrivateZone(tags=self.tags,
                                                            location='global')
+                if self.resolution_virtual_networks:
+                    zone.resolution_virtual_networks = self.construct_subresource_list(self.resolution_virtual_networks)
+                if self.registration_virtual_networks:
+                    zone.registration_virtual_networks = self.construct_subresource_list(self.registration_virtual_networks)
                 self.results['state'] = self.create_or_update_zone(zone)
             elif self.state == 'absent':
                 # delete zone
@@ -208,6 +241,20 @@ class AzureRMPrivateDNSZone(AzureRMModuleBase):
             self.fail("Error deleting zone {0} - {1}".format(
                 self.name, exc.message or str(exc)))
         return result
+
+    def preprocess_vn_list(self, vn_list):
+        return [self.parse_vn_id(x) for x in vn_list] if vn_list else None
+
+    def parse_vn_id(self, vn):
+        vn_dict = self.parse_resource_to_dict(vn) if not isinstance(vn, dict) else vn
+        return format_resource_id(val=vn_dict['name'],
+                                  subscription_id=vn_dict.get('subscription') or self.subscription_id,
+                                  namespace='Microsoft.Network',
+                                  types='virtualNetworks',
+                                  resource_group=vn_dict.get('resource_group') or self.resource_group)
+
+    def construct_subresource_list(self, raw):
+        return [self.dns_models.SubResource(id=x) for x in raw] if raw else None
 
 
 def zone_to_dict(zone):

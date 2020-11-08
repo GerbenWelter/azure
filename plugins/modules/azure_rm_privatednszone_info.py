@@ -99,6 +99,16 @@ privatednszones:
                 - name of the private DNS zone.
             sample: azure.com
             type: str
+        registration_virtual_networks:
+            description:
+                - A list of references to virtual networks that register hostnames in this DNS zone.
+            type: list
+            sample:  ["/subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/resourceGroups/myResourceGroup/providers/Microsoft.Network/virtualNetworks/bar"]
+        resolution_virtual_networks:
+            description:
+                - A list of references to virtual networks that resolve records in this DNS zone.
+            type: list
+            sample:  ["/subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/resourceGroups/myResourceGroup/providers/Microsoft.Network/virtualNetworks/deadbeef"]
         number_of_record_sets:
             description:
                 - The current number of record sets in this private DNS zone.
@@ -240,6 +250,8 @@ class AzurePrivateRMDNSZoneInfo(AzureRMModuleBase):
                     number_of_virtual_network_links,
                     number_of_virtual_network_links_with_registration=zone.
                     number_of_virtual_network_links_with_registration,
+                    registration_virtual_networks=[to_native(x.id) for x in zone.registration_virtual_networks] if zone.registration_virtual_networks else None,
+                    resolution_virtual_networks=[to_native(x.id) for x in zone.resolution_virtual_networks] if zone.resolution_virtual_networks else None,
                     tags=zone.tags)
 
 
